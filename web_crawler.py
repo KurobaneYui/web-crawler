@@ -3,82 +3,109 @@
 import os
 import sys
 import time
+# import pickle
 import requests
 import bs4
 import html5lib
 import urllib3
 import codecs
 import base64
-from concurrent.futures.process import ProcessPoolExecutor
-from concurrent.futures.thread import ThreadPoolExecutor
+from inspect import isfunction
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed
+# from concurrent.futures import wait, ALL_COMPLETED
+from multiprocessing import Lock
 from bs4 import BeautifulSoup
 from bs4 import UnicodeDammit
 
-def _newpageFind(url, header):
-    return list()
+TYPE_TAG = {
+    'img': 'src',
+    'audio': 'src',
+    'video': 'src'
+    }
 
-def _resourceFind(url,header):
-    resource_dict = dict()
+def _log(logString, logStyle='', logType='error'):
+    print(logType, ': ', logString)
 
-    page = requests.get(url,headers=header)
-    page.encoding = UnicodeDammit(page.content).original_encoding
-    page_soup = BeautifulSoup(page.content, 'html5lib')
+def downloader(url, filepath, filename, header):
+    try:
+        resource = requests.get(url, stream=True)
+        if os.path.splitext(filename)[-1] == '':
+            filename += os.path.splitext(url)[-1]
+    except requests.RequestException as error:
+        _log("There is some error of connection, please see: {}".format(error))
+        return False
+    else:
+        with open(os.path.join(filepath, filename), 'wb') as f:
+            for chunk in resource.iter_content(chunk_size=10241024):
+                if chunk:
+                    f.write(chunk)
+        _log("Successfully download: {}, and saved it to {}".format(filename,filepath),logType='success')
+        return True
 
-    for x in page_soup.find_all('img'):
-        resource_dict[x['src']] = 'img'+'/'+x['src'].split('.')[-1]
+def _resourceFind(pageSoup, fileType):
+    if isinstance(fileType,str):
+        fileUrls = set()
+        for fileTags in pageSoup.find_all(fileType):
+            fullUrl = fileTags[TYPE_TAG[fileType]]
+            if fullUrl[:2] == '//':
+                fullUrl = 'https:' + fullUrl
+            fullUrl = fullUrl.split('?')[0].split('&')[0]
+            fileUrls.add(fullUrl)
+        return list(fileUrls)
+    else:
+        _log('Your input is not list, please see: {}'.format(error))
+        return False
 
-    return resource_dict
+def _newPageFind(pageSoup):
+    return set()
 
-def _sourceFileName(x, header):
-    return ""
+def _fileNameGeneration(pageSoup, lastOne):
+    if isinstance(lastOne,str):
+        if lastOne == '':
+            currentOne = 'file_'+str(1)
+        else:
+            pre = lastOne[:5]
+            order = lastOne[5:]
+            try:
+                order = int(order)
+            except ValueError as error:
+                _log("Maybe the last name is not as expection, please see: {}".format(error))
+                return False
+            else:
+                order = order+1
+                currentOne = str(pre)+str(order)
+        return currentOne
+    else:
+        _log('Your input is not string, please see: {}'.format(error))
+        return False
 
-def download_resource(url, filepath, filename):
+def _folderNameGeneration(pageSoup, lastOne):
+    if isinstance(lastOne,str):
+        if lastOne == '':
+            currentOne = str(1)
+        else:
+            order = lastOne
+            try:
+                order = int(order)
+            except ValueError as error:
+                _log("Maybe the last name is not as expection, please see: {}".format(error))
+                return False
+            else:
+                order = order+1
+                currentOne = str(order)
+        return currentOne
+    else:
+        _log('Your input is not string, please see: {}'.format(error))
+        return False
+
+class WebCrawler():
     '''
-    说明
-    url:
-        the url of the file waiting for downloading
-    filepath:
-        the path where the file is saved
-    return:
-        when download successfully, return True; else return False
     '''
-    resource = requests.get(url, stream=True)
-    with open(os.path.join(filepath, filename), "wb") as f:
-        for chunk in resource.iter_content(chunk_size=10241024):
-            if chunk:
-                f.write(chunk)
-    print("Successfully download file {}, saved at {}".format(filename,filepath))
-
-class PaChong:
-    '''
-    说明
-    属性:
-        original_pages_set 起始挖掘页集
-        header 通信头文件
-        save_folder 保存文件夹位置
-        ---------------------------------------------------
-        rfs 资源搜索函数
-        nfs 网页迭代函数
-        sfns 文件夹名产生函数
-    方法:
-        add_original_page() 添加起始挖掘页
-        set_header() 设置通信头文件
-        set_newpages_find_strategy() 设置网页迭代方式
-        set_resources_find_strategy() 设置资源发现方式
-        ---------------------------------------------------
-        set_save_folder() 设置保存文件夹
-        set_save_folder_name_strategy() 设置保存分类的文件夹名称规则
-        ---------------------------------------------------
-        start() 单进程方式启动
-        start_with_multiprocessor() 多进程方式启动
-        ----------------------------------------------------
-        newpages_find() 网页迭代方式
-        resources_find() 资源发现方式
-        save_folder_name() 获取保存分类的文件夹名称
-    '''
-    
     def __init__(self):
-        self.original_pages_set = set()
+        self.originalPagesSet = set()
+        self.resourceTypes = set()
         self.header = {
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3',
             'Accept-Encoding': 'gzip, deflate, br',
@@ -86,346 +113,237 @@ class PaChong:
             'Cache-Control': 'max-age=0',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
-            'User-Agent' : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/76.0.3809.100 Safari/537.36'
+            'User-Agent' : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.116 Safari/537.36 Edg/80.0.361.54'
             }
-        self.save_folder = "./GetPagesDatas"
-        self.nfs = _newpageFind
-        self.rfs = _resourceFind
-        self.sfns = _sourceFileName
-        self._folderNum = 0
+        self.saveFolder = './PagesResources'
+        self.newPageFind = _newPageFind
+        self.resourceFind = _resourceFind
+        self.log = _log
+        self.fileNameGenerator = _fileNameGeneration
+        self.folderNameGenerator = _folderNameGeneration
+        # self._folderNum = 0
 
-    def add_original_page(self, pages):
-        '''
-        说明
-        pages:
-            1.if is list or tuple of strings: add urls to the set of urls
-            2.if is string: add to the set of urls
-        return:
-            bool, return False unless add at least one url
-        '''
-        if isinstance(pages, str):
-            self.original_pages_set.add(pages)
+    def setLogStrategy(self, func):
+        if isfunction(func):
+            self.log = func
             return True
-        elif isinstance(pages, list) or isinstance(pages, tuple):
-            returns = False
-            for i in pages:
-                if isinstance(i, str):
-                    self.original_pages_set.add(pages)
-                    returns = True
-                else:
-                    print("\nWarning!!! The list or tuple has instance that not the string:")
-                    print("\ttype of the instance: {}\n".format(type(i)))
-            return returns
         else:
-            print("\nError!!! Not string or list of string\n")
+            self.log('Parameter given is not a function')
             return False
 
-    def set_header(self, head):
+    def setNewPagesFindStrategy(self, func):
+        if isfunction(func):
+            self.newPageFind = func
+            return True
+        else:
+            self.log('Parameter given is not a function')
+            return False
+
+    def setResourcesFindStrategy(self, func):
+        if isfunction(func):
+            self.resourceFind = func
+            return True
+        else:
+            self.log('Parameter given is not a function')
+            return False
+
+    def setFileNameGenerationStrategy(self, func):
+        if isfunction(func):
+            self.fileNameGenerator = func
+            return True
+        else:
+            self.log('Parameter given is not a function')
+            return False
+
+    def setFolderNameGenerationStrategy(self, func):
+        if isfunction(func):
+            self.folderNameGenerator = func
+            return True
+        else:
+            self.log('Parameter given is not a function')
+            return False
+
+    def setHeader(self, head):
         '''
-        说明
-        head:
-            head for sending linking
-        return:
-            if head is a sting, then return True
         '''
         if isinstance(head, str):
             self.header = head
             return True
         else:
-            print("\nError!!! Unsupport instance type\n")
-            return False
-
-    def set_newpages_find_strategy(self, func):
-        '''
-        说明
-        func:
-            a function which accept one para and return a list of urls of pages
-        return:
-            a list of urls of pages
-        '''
-        import inspect
-        if inspect.isfunction(func):
-            self.nfs = func
-            return True
-        else:
-            print("\nError!!! Not a function\n")
-            return False
-
-    def set_resources_find_strategy(self, func):
-        '''
-        说明
-        func:
-            a function which accept one para and return a list of urls of resources
-        return:
-            a list of urls of resources
-        '''
-        import inspect
-        if inspect.isfunction(func):
-            self.rfs = func
-            return True
-        else:
-            print("\nError!!! Not a function\n")
-            return False
-
-    def set_save_folder(self, path):
-        '''
-        说明
-        path:
-            the path of the folder where files are saved
-        return:
-            if path exist, then return True
-        '''
+            self.log('Header must be string, but given type is: {}'.format(type(head)))
+            
+    def setSaveFolder(self, path):
         if os.path.isdir(path):
-            self.save_folder = os.path.join(path, "pachong/")
-            print("Set save folder directory as: {}".format(self.save_folder))
+            self.saveFolder = os.path.join(path, 'PagesResources/')
+            self.log('Set save folder to: {}'.format(self.saveFolder), logType='success')
             return True
         else:
-            print("\nError!!! Not a directory\n")
+            self.log("It's not a folder path, or folder is not exist")
             return False
 
-    def set_save_folder_name_strategy(self, func):
-        '''
-        说明
-        func:
-            a function which accept one para and return a string of a folder name
-        return:
-            a string of a folder name
-        '''
-        import inspect
-        if inspect.isfunction(func):
-            self.sfns = func
+    def addResourceType(self, resourceType):
+        if isinstance(resourceType, str):
+            if resourceType in TYPE_TAG:
+                self.resourceTypes.add(resourceType)
+                self.log('Successfully add a resource type: {}'.format(resourceType),logType='success')
+                return True
+            else:
+                self.log('The resource type you want to add is not support: {}'.format(resourceType))
+                return False
+        elif isinstance(resourceType, list) or isinstance(resourceType, tuple):
+            add_counter = 0
+            for i in resourceType:
+                if isinstance(i, str):
+                    if i in TYPE_TAG:
+                        self.resourceTypes.add(i)
+                        add_counter += 1
+                    else:
+                        self.log("We got an file type but not in our support list, the type is: {}".format(i))
+                else:
+                    self.log('We got an element that not string, element type is: {}'.format(type(i)))
+            self.log('Successfully add {} types of resource'.format(type(add_counter)), logType='success')
             return True
         else:
-            print("\nError!!! Not a function\n")
+            self.log('The resource type you input is in unsupported type: {}'.format(type(resourceType)))
             return False
 
-    def start(self, method=1, have_content=True, numerical=False):
-        '''
-        两种网页迭代方式
-        方式一(method=1)：从原始网页可以获取所有要迭代的网页链接（原始网页是否包含数据分别对应以下1和2）
-        （建立保存文件夹！！！）
-            1.遍历原始网页，挑出一个(have_content=True)
-                i.送入网页迭代函数，获取所有网页（原始网页添加在第一个位置）
-                ii.送入文件夹名称函数，获取保存的文件夹的名称
-                iii.迭代每一个网页
-                    i.第几个网页，则文件名前缀为几
-                    ii.送入资源获取函数，返回资源列表
-                    iii.第几个资源则文件名后缀为几
-                    iv.传入资源链接和文件保存位置以及名称，下载资源
-            2.遍历原始网页，挑出一个(have_content=False)
-                （建立保存文件夹）
-                i.送入网页迭代函数，获取所有网页
-                ii.送入文件夹名称函数，获取保存的文件夹的名称
-                iii.迭代每一个网页
-                    i.第几个网页，则文件名前缀为几
-                    ii.送入资源获取函数，返回资源列表
-                    iii.第几个资源则文件名后缀为几
-                    iv.传入资源链接和文件保存位置以及名称，下载资源
-        ----------------------------------------------------
-        方式二(method=2)：网页需要通过已发现的网页进行不重复的迭代（原始网页是否包含数据分别对应以下1和2）
-        （建立保存文件夹！！！）
-            1.遍历原始网页，挑出一个(have_content=True)
-                i.送入文件夹名称函数，获取保存的文件夹名称
-                *ii.第几个网页则保存的文件前缀为几
-                *iii.送入资源获取函数，返回资源列表
-                *iv.第几个资源则文件名后缀为几
-                *v.传入资源链接和文件保存位置以及名称，下载资源
-                ii.循环直至迭代终了
-                    i.网页放入迭代函数，获取到下一个网页，无则循环终了
-                    ii.第几个网页则保存的文件前缀为几
-                    iii.送入资源获取函数，返回资源列表
-                    iv.第几个资源则文件名后缀为几
-                    v.传入资源链接和文件保存位置以及名称，下载资源
-            2.遍历原始网页，挑出一个(have_content=False)
-                i.送入文件夹名称函数，获取保存的文件夹名称
-                ii.循环直至迭代终了
-                    i.网页放入迭代函数，获取到下一个网页，无则循环终了
-                    ii.第几个网页则保存的文件前缀为几
-                    iii.送入资源获取函数，返回资源列表
-                    iv.第几个资源则文件名后缀为几
-                    v.传入资源链接和文件保存位置以及名称，下载资源
-        '''
-
-        if not os.path.isdir(self.save_folder):
-            os.mkdir(self.save_folder)
-
-        if method == 1:
-            for url in self.original_pages_set: # 从原始网页中遍历每一个原始页面
-                
-                new_page_list = self.newpages_find(url) # 获取子页面
-                
-                if have_content == True: # 如果原始页面也包含内容
-                    new_page_list = [url]+new_page_list # 把原始页面放入子页面列表的第一个
-                elif have_content == False:
-                    pass
+    def addOriginalPage(self, urls):
+        if isinstance(urls, str):
+            self.originalPagesSet.add(urls)
+            self.log('Add 1 url to OriginalPages.', logType='success')
+            return True
+        elif isinstance(urls, list) or isinstance(urls, tuple):
+            add_counter = 0
+            # SET.update(set(LIST)) method cannot check the elements
+            for url in urls:
+                if isinstance(url, str):
+                    self.originalPagesSet.add(url)
+                    add_counter += 1
                 else:
-                    print("\nError!!! have_content must be bool type\n")
-                
-                folder_name = self.save_folder_name(url, numerical) # 获取要保存至的文件夹的名称
-                folder_path = os.path.join(self.save_folder,folder_name)
-                if not os.path.isdir(folder_path):
-                    os.mkdir(folder_path)
-
-                page_counter = 0
-                for subpage in new_page_list: # 遍历每一个含有资源的网页
-                    page_counter += 1
-                    fileNAMEq = str(page_counter)
-                    resources_url = self.resources_find(subpage) # 获取每一个资源的链接和资源类型
-
-                    resource_counter = 0
-                    for resource_url,resource_type in resources_url.items():
-                        resource_counter += 1
-                        fileNAME = fileNAMEq+'_'+str(resource_counter)
-                        print("Downloading {} file, named as: {}".format(resource_type.split('/')[0], fileNAME))
-                        download_resource(resource_url, folder_path, fileNAME+'.{}'.format(resource_type.split('/')[1])) # 开始下载
-        elif method == 2:
-            pass
+                    self.log('We got an element that not string, and type is: {}'.format(type(url)), logType='warning')
+            self.log('Add {} url(s) to OriginalPages.'.format(add_counter), logType='success')
+            return True
         else:
-            print("\nError!!! method can only be 1 or 2\n")
+            self.log('The given parameter is not string, tuple, or list, the type is: {}'.format(type(urls)))
+            return False
 
-    def start_with_multiprocessor(self, method=1, have_content=True, numerical=False, max_workers=None):
-        '''
-        两种网页迭代方式
-        方式一(method=1)：从原始网页可以获取所有要迭代的网页链接（原始网页是否包含数据分别对应以下1和2）
-        （建立保存文件夹！！！）
-            1.遍历原始网页，挑出一个(have_content=True)
-                i.送入网页迭代函数，获取所有网页（原始网页添加在第一个位置）
-                ii.送入文件夹名称函数，获取保存的文件夹的名称
-                iii.迭代每一个网页
-                    i.第几个网页，则文件名前缀为几
-                    ii.送入资源获取函数，返回资源列表
-                    iii.第几个资源则文件名后缀为几
-                    iv.传入资源链接和文件保存位置以及名称，下载资源
-            2.遍历原始网页，挑出一个(have_content=False)
-                （建立保存文件夹）
-                i.送入网页迭代函数，获取所有网页
-                ii.送入文件夹名称函数，获取保存的文件夹的名称
-                iii.迭代每一个网页
-                    i.第几个网页，则文件名前缀为几
-                    ii.送入资源获取函数，返回资源列表
-                    iii.第几个资源则文件名后缀为几
-                    iv.传入资源链接和文件保存位置以及名称，下载资源
-        ----------------------------------------------------
-        方式二(method=2)：网页需要通过已发现的网页进行不重复的迭代（原始网页是否包含数据分别对应以下1和2）
-        （建立保存文件夹！！！）
-            1.遍历原始网页，挑出一个(have_content=True)
-                i.送入文件夹名称函数，获取保存的文件夹名称
-                *ii.第几个网页则保存的文件前缀为几
-                *iii.送入资源获取函数，返回资源列表
-                *iv.第几个资源则文件名后缀为几
-                *v.传入资源链接和文件保存位置以及名称，下载资源
-                ii.循环直至迭代终了
-                    i.网页放入迭代函数，获取到下一个网页，无则循环终了
-                    ii.第几个网页则保存的文件前缀为几
-                    iii.送入资源获取函数，返回资源列表
-                    iv.第几个资源则文件名后缀为几
-                    v.传入资源链接和文件保存位置以及名称，下载资源
-            2.遍历原始网页，挑出一个(have_content=False)
-                i.送入文件夹名称函数，获取保存的文件夹名称
-                ii.循环直至迭代终了
-                    i.网页放入迭代函数，获取到下一个网页，无则循环终了
-                    ii.第几个网页则保存的文件前缀为几
-                    iii.送入资源获取函数，返回资源列表
-                    iv.第几个资源则文件名后缀为几
-                    v.传入资源链接和文件保存位置以及名称，下载资源
-        '''
+    def oneProcess(self, multithread):
+        if not os.path.isdir(self.saveFolder):
+            os.mkdir(self.saveFolder)
+            self.log('root folder is not exist, create folder: {}'.format(self.saveFolder),logType='warning')
+        
+        pageFolderName = ''
+        while len(self.originalPagesSet):
+            url = self.originalPagesSet.pop()
+            
+            page = requests.get(url,headers = self.header)
+            page.encoding = UnicodeDammit(page.content).original_encoding
+            pageSoup = BeautifulSoup(page.content,'html5lib')
 
-        if not os.path.isdir(self.save_folder):
-            os.mkdir(self.save_folder)
+            self.originalPagesSet = self.originalPagesSet.union(self.newPageFind(pageSoup))
+            pageFolderName = self.folderNameGenerator(pageSoup, pageFolderName) # TODO: finished name generator
+            if not os.path.isdir(os.path.join(self.saveFolder,pageFolderName)):
+                os.mkdir(os.path.join(self.saveFolder,pageFolderName))
+            while len(self.resourceTypes):
+                resourceType = self.resourceTypes.pop()
+                if not resourceType in TYPE_TAG:
+                    self.log('file type is not support: {}'.format(fType))
+                    continue
+                #==========
+                processor(
+                    pageSoup,
+                    self.header,
+                    resourceType,
+                    os.path.join(self.saveFolder,pageFolderName),
+                    self.resourceFind,
+                    self.fileNameGenerator,
+                    multithread
+                    )
+                #==========
 
-        if method == 1:
-            process_pool = ProcessPoolExecutor(max_workers=max_workers)
-            process_pool_tasks = list()
+    def multiProcess(self, multithread):
+        processPool = ProcessPoolExecutor()
 
-            for url in self.original_pages_set: # 从原始网页中遍历每一个原始页面
-                
-                new_page_list = self.newpages_find(url) # 获取子页面
-                
-                if have_content == True: # 如果原始页面也包含内容
-                    new_page_list = [url]+new_page_list # 把原始页面放入子页面列表的第一个
-                elif have_content == False:
-                    pass
-                else:
-                    print("\nError!!! have_content must be bool type\n")
-                
-                folder_name = self.save_folder_name(url, numerical) # 获取要保存至的文件夹的名称
-                folder_path = os.path.join(self.save_folder,folder_name)
-                if not os.path.isdir(folder_path):
-                    os.mkdir(folder_path)
+        if not os.path.isdir(self.saveFolder):
+            os.mkdir(self.saveFolder)
+            self.log('root folder is not exist, create folder: {}'.format(self.saveFolder),logType='warning')
+        
+        pageFolderName = '';fileName=1
+        while len(self.originalPagesSet):
+            url = self.originalPagesSet.pop()
+            
+            page = requests.get(url,headers = self.header)
+            page.encoding = UnicodeDammit(page.content).original_encoding
+            pageSoup = BeautifulSoup(page.content,'html5lib')
 
-                page_counter = 0
-                for subpage in new_page_list: # 遍历每一个含有资源的网页
-                    page_counter += 1
-                    fileNAMEq = str(page_counter)
-                    resources_url = self.resources_find(subpage) # 获取每一个资源的链接和资源类型
-
-                    resource_counter = 0
-                    for resource_url,resource_type in resources_url.items():
-                        resource_counter += 1
-                        fileNAME = fileNAMEq+'_'+str(resource_counter)
-                        print("Downloading {} file, named as: {}".format(resource_type.split('/')[0], fileNAME))
-
-                        process_pool_tasks.append(
-                            process_pool.submit(
-                                download_resource,
-                                resource_url,
-                                folder_path,
-                                fileNAME+'.{}'.format(resource_type.split('/')[1])
-                                )
-                            ) # 放入进程池
-            process_pool.shutdown()
-            #wait(process_pool_tasks,return_when=ALL_COMPLETED)
-        elif method == 2:
-            pass
+            self.originalPagesSet = self.originalPagesSet.union(self.newPageFind(pageSoup))
+            pageFolderName = self.folderNameGenerator(pageSoup, pageFolderName) # TODO: finished name generator
+            if not os.path.isdir(os.path.join(self.saveFolder,pageFolderName)):
+                os.mkdir(os.path.join(self.saveFolder,pageFolderName))
+            while len(self.resourceTypes):
+                resourceType = self.resourceTypes.pop()
+                if not resourceType in TYPE_TAG:
+                    self.log('file type is not support: {}'.format(fType))
+                    continue
+                # 针对指定类型，开启进程，传入参数：
+                # pageSoup、文件夹完整目录、header参数、
+                # 文件类型、资源发现函数、文件名生成函数
+                #==========
+                processPool.submit(
+                    processor,
+                    pageSoup,
+                    self.header,
+                    resourceType,
+                    os.path.join(self.saveFolder,pageFolderName),
+                    self.resourceFind,
+                    self.fileNameGenerator,
+                    multithread,
+                    )
+                #==========
+        # for future in as_completed(processPoolTasks):
+        #     try:
+        #         result = future.result()
+        #     except BaseException as error:
+        #         print(error)
+        processPool.shutdown(True)
+    
+    def start(self, multiprocess=True, multithread=True):
+        print(sys.getrecursionlimit())
+        sys.setrecursionlimit(5000)
+        self.log('Start crawler, you set download folder: {} \n\t absolute path is: {}'.format(self.saveFolder,os.path.abspath(self.saveFolder)),logType='warning')
+        if multiprocess:
+            self.multiProcess(multithread)
         else:
-            print("\nError!!! method can only be 1 or 2\n")
+            self.oneProcess(multithread)
+        
 
-    def newpages_find(self, url):
-        '''
-        说明
-        url:
-            the url which to find new pages based on
-        return:
-            a list of new pages
-        '''
-        print("searching new pages...")
-        new_pages = self.nfs(url, self.header)
-        print("we find these page(s):")
-        if new_pages is None or new_pages == []:
-            print("\tNothing")
-        else:
-            for i in new_pages:
-                print("\t",i)
-        return new_pages
+def processor(pageSoup, header, fileType, saveFolder, func_resourceFind, func_fileName, multithread):
+    if multithread:
+        threadPool = ThreadPoolExecutor()
 
-    def resources_find(self, url):
-        '''
-        说明
-        url:
-            the url where to find resource
-        return:
-            a dict of all resources, the key is the url of resource and the value is the type of the resource
-        '''
-        print("searching all resources...")
-        resources = self.rfs(url, self.header);print(resources)
-        print("we get these resources:")
-        if resources is None or resources == {}:
-            print("\tNothing")
-        else:
-            for a,b in resources.items():
-                print("\t",b,"\t",a)
-        return resources
+    fileUrls = func_resourceFind(pageSoup, fileType)
+    # 对每个list启动线程进行下载，传入参数：
+    # header、文件名、保存路径、文件链接
+    #==========
+    fileName = ''
+    for fileUrl in fileUrls:
+        fileName = func_fileName(pageSoup, fileName) # TODO: finished name generator
 
-    def save_folder_name(self, urlORnum, numerical=False):
-        '''
-        说明
-        urlORnum:
-            url to substract name or accumulatable num for name
-        return:
-            a string of file name
-        '''
-        if numerical:
-            self._folderNum += 1
-            return str(self._folderNum)
+        if multithread:
+            threadPool.submit(
+                downloader,
+                fileUrl,
+                saveFolder,
+                fileName,
+                header
+                )
         else:
-            return self.sfns(urlORnum, self.header)
+            downloader(
+                fileUrl,
+                saveFolder,
+                fileName,
+                header
+                )
+    #==========
+    if multithread:
+        threadPool.shutdown(True)
