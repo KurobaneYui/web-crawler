@@ -1,0 +1,29 @@
+{
+    "saveRootFolder": "G:/待整理恢复/桌面文档/bilibili相簿",
+    "resources": {
+        "search": [
+            ".images",
+            "img"
+        ],
+        "target": "src",
+        "process": {
+            "split": "@"
+        }
+    },
+    "folderName": {
+        "search": [
+            ".author-name",
+            "h1"
+        ],
+        "target": "textContent",
+        "process": {
+            "replace": [
+                {"\r\n":""},
+                {"<":"("},
+                {">":")"}
+            ]
+        }
+    },
+    "fileName": {
+    }
+}

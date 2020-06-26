@@ -1,0 +1,41 @@
+{
+  "resources": {
+    "search": [".entry-content", "p", "img"],
+    "target": ["[src]"],
+    "process": []
+  },
+  "info": {
+    "title": {
+      "search": [],
+      "target": [
+        ".entry-header",
+        "h1",
+        {
+          "children": 0
+        }
+      ],
+      "process": []
+    },
+    "tag": {
+      "search": [".post-tags-meat", "a"],
+      "target": [
+        ".tag-text",
+        {
+          "children": 0
+        }
+      ],
+      "process": [
+        {
+          "replace": {
+            "\r\n": "",
+            "?": "？",
+            ":": "-",
+            "<": "(",
+            ">": ")"
+          }
+        }
+      ]
+    }
+  },
+  "fileName": {}
+}
