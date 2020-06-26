@@ -1,3 +1,5 @@
+> Warning: WIP 功能尚不完善
+
 # 简单网页爬虫
 
 提供两种爬虫。legency使用普通requests、BeautifulSoup4模块，部分网页无法爬取；pyppeteer使用pyppeteer的API，速度较慢。
